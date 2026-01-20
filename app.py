@@ -25,6 +25,12 @@ DATE_FIELD = "DateTermine"
 DEFAULT_TIME = time(15, 0)
 
 
+def has_value(val):
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return False
+    return str(val).strip() != ""
+
+
 def load_excel(file_or_path):
     xls = pd.ExcelFile(file_or_path, engine="openpyxl")
     sheet_name = xls.sheet_names[0]
@@ -57,11 +63,6 @@ def clean_df(df):
     df_clean = df.copy()
     df_clean["_orig_index"] = df_clean.index
 
-    def has_value(val):
-        if val is None or (isinstance(val, float) and pd.isna(val)):
-            return False
-        return str(val).strip() != ""
-
     mask_filled = df_clean["CustomFieldValue"].apply(has_value)
 
     target_fields = {"diametre", "materiel", "posoudurecorrige", "sch", "type"}
@@ -71,6 +72,12 @@ def clean_df(df):
 
     df_clean = df_clean[~(mask_filled | mask_ass)].copy()
     return df_clean
+
+
+def passthrough_df(df):
+    df_copy = df.copy()
+    df_copy["_orig_index"] = df_copy.index
+    return df_copy
 
 
 def format_datetime(date_value, time_value):
@@ -156,6 +163,17 @@ def export_bytes(df_clean, sheet_name, original_columns):
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         export_df.to_excel(writer, sheet_name=sheet_name, index=False)
+    return output.getvalue()
+
+
+def export_genius_bytes(df_clean, sheet_name, original_columns):
+    genius_df = df_clean[df_clean["CustomFieldValue"].apply(has_value)].copy()
+    genius_df = genius_df.drop(columns=["_orig_index"], errors="ignore")
+    if original_columns:
+        genius_df = genius_df[original_columns]
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        genius_df.to_excel(writer, sheet_name=sheet_name, index=False)
     return output.getvalue()
 
 
@@ -513,7 +531,7 @@ def main():
             st.warning("Chemin de sauvegarde manquant pour l'auto-save.")
         st.session_state["job_changed"] = False
 
-    col_save, col_export = st.columns(2)
+    col_save, col_export, col_genius = st.columns(3)
     if col_save.button("Sauvegarder maintenant"):
         try:
             save_to_disk(
@@ -540,6 +558,21 @@ def main():
         "Exporter Excel",
         data=export_data,
         file_name=export_name,
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+    genius_data = export_genius_bytes(
+        st.session_state["df_clean"],
+        st.session_state["sheet_name"],
+        st.session_state["original_columns"],
+    )
+    genius_name = (
+        f"genius_{export_name}" if export_name else "genius_export.xlsx"
+    )
+    col_genius.download_button(
+        "Exporter Genius",
+        data=genius_data,
+        file_name=genius_name,
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
